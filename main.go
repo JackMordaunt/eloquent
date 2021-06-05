@@ -2,69 +2,63 @@ package main
 
 import (
 	"fmt"
-	"go/types"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
 	"text/template"
+	"unicode"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/davecgh/go-spew/spew"
 )
+
+func init() {
+	spew.Config = spew.ConfigState{
+		Indent:            "    ",
+		DisableMethods:    true,
+		DisableCapacities: true,
+	}
+}
 
 func main() {
 	if err := func() error {
 		var (
 			path string
 		)
-		// if len(os.Args) < 2 && os.Getenv("GOPACKAGE") == "" {
-		// 	return fmt.Errorf("specify package path")
-		// }
-		// if p := os.Getenv("GOPACKAGE"); p != "" {
-		// 	path = p
-		// }
 		if len(os.Args) > 1 {
 			path = os.Args[1]
 		}
 		if path == "" {
 			return fmt.Errorf("specify package path")
 		}
-		fmt.Printf("package: %q\n", path)
-		pkg, err := loadPkg(path)
+		src, err := ioutil.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading file: %w", err)
 		}
-		fmt.Printf("type info: %v\n", pkg.TypesInfo)
-		for ident, def := range pkg.TypesInfo.Defs {
-			if !ident.IsExported() {
-				continue
-			}
-			if !strings.HasSuffix(ident.Name, "Style") {
-				continue
-			}
-			obj, ok := def.Type().Underlying().(*types.Struct)
-			if !ok {
-				continue
-			}
-			for ii := 0; ii < obj.NumFields(); ii++ {
-				var (
-					field = obj.Field(ii)
-				)
-				if !field.Exported() {
-					continue
-				}
-				fmt.Printf("%s\n", &Setter{
-					StructType: ident.Name,
-					FieldName:  field.Name(),
-					FieldType:  field.Type().String(),
-					Receiver:   "style",
-					Argument:   string(strings.ToLower(field.Name())[0]),
-				})
-			}
+		out, err := Generate(string(src))
+		if err != nil {
+			return fmt.Errorf("generating fluent methods: %w", err)
 		}
-		return nil
+		return ioutil.WriteFile(fmt.Sprintf("%s_fluent.go", path), []byte(out), 0665)
 	}(); err != nil {
 		fmt.Printf("error: %v", err)
 	}
+}
+
+// Generate fluent methods for struct definitions in the given source.
+func Generate(src string) (string, error) {
+	fs := token.NewFileSet()
+	f, err := parser.ParseFile(fs, "", src, parser.ParseComments)
+	if err != nil {
+		return "", fmt.Errorf("parsing file: %w", err)
+	}
+	var b strings.Builder
+	ast.Walk(StructVisitor{Suffix: "Style", Wr: &b}, f)
+	return b.String(), nil
 }
 
 // Setter generates a fluent method.
@@ -74,6 +68,7 @@ type Setter struct {
 	FieldType  string
 	Receiver   string
 	Argument   string
+	Doc        string
 
 	init sync.Once
 	t    *template.Template
@@ -83,10 +78,11 @@ type Setter struct {
 func (s *Setter) String() string {
 	s.init.Do(func() {
 		s.t, s.err = template.New("").Parse(strings.TrimSpace(`
-			func ({{.Receiver}} {{.StructType}}) With{{.FieldName}}({{.Argument}} {{.FieldType}}) {{.StructType}} {
-				{{.Receiver}}.{{.FieldName}} = {{.Argument}}
-				return {{.Receiver}}
-			}
+// {{.Doc}}
+func ({{.Receiver}} {{.StructType}}) With{{.FieldName}}({{.Argument}} {{.FieldType}}) {{.StructType}} {
+	{{.Receiver}}.{{.FieldName}} = {{.Argument}}
+	return {{.Receiver}}
+}
 		`))
 	})
 	if s.t == nil {
@@ -101,21 +97,48 @@ func (s *Setter) Err() error {
 	return s.err
 }
 
-func loadPkg(path string) (*packages.Package, error) {
-	pkgs, err := packages.Load(
-		&packages.Config{
-			Mode: packages.NeedTypes | packages.NeedImports | packages.NeedSyntax | packages.NeedDeps,
-		},
-		path,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("loading packages: %w", err)
+// StructVisitor visits struct definitions and generates Fluent method stubs.
+type StructVisitor struct {
+	// Suffix to match against. Could use regex for more generic approach.
+	Suffix string
+	// Wr to write generated methods into. Typically a file handle.
+	Wr io.Writer
+}
+
+func (sv StructVisitor) Visit(n ast.Node) ast.Visitor {
+	t, ok := n.(*ast.TypeSpec)
+	if !ok {
+		return sv
 	}
-	if packages.PrintErrors(pkgs) > 0 {
-		os.Exit(1)
+	if !strings.HasSuffix(t.Name.String(), sv.Suffix) {
+		return sv
 	}
-	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("package not found")
+	obj, ok := t.Type.(*ast.StructType)
+	if !ok {
+		return sv
 	}
-	return pkgs[0], nil
+	for _, field := range obj.Fields.List {
+		if isEmbedded := len(field.Names) == 0; isEmbedded {
+			continue
+		}
+		var (
+			structType   = t.Name.String()
+			fieldName    = field.Names[0].String()
+			fieldType    = fmt.Sprintf("%s", field.Type)
+			fieldComment = strings.TrimSpace(field.Doc.Text())
+		)
+		if isExported := unicode.IsUpper(rune(fieldName[0])); !isExported {
+			continue
+		}
+		fmt.Fprint(sv.Wr, &Setter{
+			StructType: structType,
+			FieldName:  fieldName,
+			FieldType:  fieldType,
+			Receiver:   "style",
+			Argument:   string(strings.ToLower(fieldType)[0]),
+			Doc:        fmt.Sprintf("With%s", fieldComment),
+		})
+		fmt.Fprint(sv.Wr, "\n\n")
+	}
+	return sv
 }
