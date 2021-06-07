@@ -148,17 +148,25 @@ func (sv StructVisitor) Visit(n ast.Node) ast.Visitor {
 		if isEmbedded := len(field.Names) == 0; isEmbedded {
 			continue
 		}
-		ident := field.Names[0].String()
-		if isExported := unicode.IsUpper(rune(ident[0])); !isExported {
-			continue
+		for _, ident := range field.Names {
+			if isExported := unicode.IsUpper(rune(ident.Name[0])); !isExported {
+				continue
+			}
+			var ft string
+			switch n := field.Type.(type) {
+			case *ast.Ident:
+				ft = n.Name
+			case *ast.SelectorExpr:
+				if pkg, ok := n.X.(*ast.Ident); ok {
+					ft = fmt.Sprintf("%s.%s", pkg.Name, n.Sel.Name)
+				}
+			}
+			fields = append(fields, Field{
+				Type:       ft,
+				Identifer:  ident.Name,
+				DocComment: strings.TrimSpace(field.Doc.Text()),
+			})
 		}
-		fmt.Printf("%+v\n", field.Type)
-		// TODO(jfm): handle non-primitive types: structures, pointers, slices and maps.
-		fields = append(fields, Field{
-			Type:       fmt.Sprintf("%s", field.Type),
-			Identifer:  ident,
-			DocComment: strings.TrimSpace(field.Doc.Text()),
-		})
 	}
 	sv.Callback(Struct{
 		Type:   t.Name.String(),
@@ -200,7 +208,7 @@ func (s Struct) GenerateFluentMethods() (string, error) {
 			Argument:   strings.ToLower(string(field.Type[0])),
 			Doc: func() string {
 				if field.DocComment != "" {
-					return field.DocComment
+					return fmt.Sprintf("// With%s", strings.Join(strings.Split(field.DocComment, "\n"), "\n// "))
 				}
 				return ""
 			}(),
