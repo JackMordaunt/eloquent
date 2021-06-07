@@ -152,12 +152,16 @@ func (sv StructVisitor) Visit(n ast.Node) ast.Visitor {
 				continue
 			}
 			var ft string
+			if ptr, ok := field.Type.(*ast.StarExpr); ok {
+				ft = "*"
+				field.Type = ptr.X
+			}
 			switch n := field.Type.(type) {
 			case *ast.Ident:
-				ft = n.Name
+				ft += n.Name
 			case *ast.SelectorExpr:
 				if pkg, ok := n.X.(*ast.Ident); ok {
-					ft = fmt.Sprintf("%s.%s", pkg.Name, n.Sel.Name)
+					ft += fmt.Sprintf("%s.%s", pkg.Name, n.Sel.Name)
 				}
 			}
 			fields = append(fields, Field{
@@ -204,7 +208,12 @@ func (s Struct) GenerateFluentMethods() (string, error) {
 			FieldType:  field.Type,
 			FieldIdent: field.Identifer,
 			Receiver:   "style",
-			Argument:   strings.ToLower(string(field.Type[0])),
+			Argument: func() string {
+				if isPointer := field.Type[0] == '*'; isPointer {
+					return strings.ToLower(string(field.Type[1]))
+				}
+				return strings.ToLower(string(field.Type[0]))
+			}(),
 			Doc: func() string {
 				if field.DocComment != "" {
 					return fmt.Sprintf("// With%s", strings.Join(strings.Split(field.DocComment, "\n"), "\n// "))
