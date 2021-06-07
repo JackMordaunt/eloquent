@@ -44,7 +44,7 @@ func main() {
 		}
 		// Note(jfm): Should we assume the directory matches the package name? This is common
 		// convention, but is not guaranteed.
-		fmt.Fprintf(w, "package %s\n\n", strings.Split(filepath.Base(path), ".")[0])
+		fmt.Fprintf(w, "package %s\n\n", strings.Split(filepath.Dir(path), ".")[0])
 		entries, err := ioutil.ReadDir(path)
 		if err != nil {
 			return fmt.Errorf("reading dir: %w", err)
