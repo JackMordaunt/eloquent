@@ -13,6 +13,11 @@ import (
 	"text/template"
 )
 
+// TODO(jfm): imports
+// TODO(jfm): robust package name detection
+//
+// Might need to use the "packages" package to get structured package data.
+
 func main() {
 	if err := func() error {
 		var (
