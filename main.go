@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
-	"unicode"
 )
 
 func main() {
@@ -149,7 +148,7 @@ func (sv StructVisitor) Visit(n ast.Node) ast.Visitor {
 			continue
 		}
 		for _, ident := range field.Names {
-			if isExported := unicode.IsUpper(rune(ident.Name[0])); !isExported {
+			if !ident.IsExported() {
 				continue
 			}
 			var ft string
