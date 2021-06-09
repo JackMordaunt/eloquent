@@ -2,4 +2,4 @@ module git.sr.ht/~jackmordaunt/eloquent
 
 go 1.16
 
-require github.com/davecgh/go-spew v1.1.1
+require github.com/dave/jennifer v1.4.1
