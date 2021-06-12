@@ -15,10 +15,9 @@ import (
 	"github.com/dave/jennifer/jen"
 )
 
-// TODO(jfm): imports
-// TODO(jfm): robust package name detection
-//
-// Might need to use the "packages" package to get structured package data.
+// TODO(jfm): robust package name detection.
+// TODO(jfm): avoid duplicate method definitions; fluent method may already be
+// defined by author.
 
 func main() {
 	if err := func() error {
@@ -213,13 +212,20 @@ func (v ImportVisitor) Visit(n ast.Node) ast.Visitor {
 		return v
 	}
 	var (
-		name = base(im.Path.Value)
+		name = name(base(im.Path.Value))
 		path = clean(im.Path.Value)
 	)
 	if im.Name != nil {
 		name = im.Name.Name
 	}
-	(*v.Map)[name] = path
+	var p string
+	for ii, fragment := range strings.Split(path, "/") {
+		if ii > 0 {
+			p += "/"
+		}
+		p += fragment
+		(*v.Map)[name] = p
+	}
 	return v
 }
 
@@ -232,4 +238,16 @@ func base(p string) string {
 // clean strips the quotes off a path.
 func clean(p string) string {
 	return strings.Trim(p, `"`)
+}
+
+// name applies go conventions when importing a path with symbols in it.
+// Any characters after '.' and '-' are ignored.
+func name(p string) string {
+	if idx := strings.LastIndex(p, "."); idx > 0 {
+		p = p[:idx]
+	}
+	if idx := strings.LastIndex(p, "-"); idx > 0 {
+		p = p[:idx]
+	}
+	return p
 }
