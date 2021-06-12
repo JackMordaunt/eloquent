@@ -86,14 +86,21 @@ func main() {
 							argument += strings.ToLower(string(c))
 						}
 					}
-					// TODO(jfm): handle pointer identifiers.
 					var ident = jen.Id(argument).Id(field.Type)
 					if parts := strings.Split(field.Type, "."); len(parts) > 1 {
-						fullyQualified, ok := imports[parts[0]]
-						if !ok {
-							ident = jen.Id(argument).Qual(parts[0], parts[1])
-						} else {
-							ident = jen.Id(argument).Qual(fullyQualified, parts[1])
+						var (
+							selector  = parts[0]
+							symbol    = parts[1]
+							isPointer = selector[0] == '*'
+						)
+						ident = jen.Id(argument).Id(field.Type)
+						fullyQualified, ok := imports[ensureSelector(selector)]
+						if ok {
+							if isPointer {
+								ident = jen.Id(argument).Id("*").Qual(fullyQualified, symbol)
+							} else {
+								ident = jen.Id(argument).Qual(fullyQualified, symbol)
+							}
 						}
 					}
 					if field.DocComment != "" {
@@ -104,7 +111,7 @@ func main() {
 					file.Func().
 						Params(jen.Id("style").Id(s.Type)).
 						Id(fmt.Sprintf("With%s", field.Identifer)).
-						Call(ident).
+						Params(ident).
 						Id(s.Type).
 						Block(
 							jen.Id("style").Dot(field.Identifer).Op("=").Id(argument),
@@ -250,4 +257,16 @@ func name(p string) string {
 		p = p[:idx]
 	}
 	return p
+}
+
+// ensureSelector strips any leading '*' for pointer identifies, so that the
+// selector can be known.
+func ensureSelector(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	if isPointer := s[0] == '*'; isPointer {
+		return s[1:]
+	}
+	return s
 }
